@@ -37,7 +37,7 @@ class DataLoader():
                 images_batch = images[offset:offset + batch_size]
                 measurements_batch = measurements[offset:offset + batch_size]
                 
-                X_batch = np.array(list(map(self._read_image, images_batch)))
+                X_batch = np.array(list(map(self._process_image, images_batch)))
                 Y_batch = measurements_batch[:,0] # Takes the steering angle only for now
                 
                 yield X_batch, Y_batch
@@ -45,6 +45,12 @@ class DataLoader():
     def _read_image(self, image_file, color_space = cv2.COLOR_BGR2RGB):
         img = cv2.imread(os.path.join(self.img_folder, image_file))
         return cv2.cvtColor(img, color_space)
+
+    def _process_image(self, image_file, color_space = cv2.COLOR_BGR2RGB, clip = [50, 20], out_shape = (200, 66)):
+        img = self._read_image(image_file, color_space = color_space)
+        img = img[clip[0]:img.shape[0] - clip[1],:,:]
+        img = cv2.resize(img, out_shape, interpolation = cv2.INTER_CUBIC)
+        return img
 
     def _process_data(self):
         
