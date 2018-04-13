@@ -4,3 +4,4 @@ __pycache__
 logs
 data/
 model_*.h5
+model_*.png

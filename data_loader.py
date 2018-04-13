@@ -9,20 +9,25 @@ from tqdm import tqdm
 
 class DataLoader():
 
-    def __init__(self, train_file, log_file, img_folder, angle_correction = 0.2):
+    def __init__(self, train_file, log_file, img_folder, 
+                 angle_correction = 0.2, 
+                 path_separator = '\\',
+                 flip_min_angle = 0.25):
         self.train_file = train_file
         self.log_file = log_file
         self.img_folder = img_folder
         self.angle_correction = angle_correction
+        self.path_separator = path_separator
+        self.flip_min_angle = flip_min_angle
 
-    def load_dataset(self):
-        if os.path.isfile(self.train_file):
-            print('Training file exists, loading...')
-            images, measurements = self._read_pickle()
-        else:
-            print('Training file absent, processing data...')
+    def load_dataset(self, regenerate = False):
+        if regenerate or not os.path.isfile(self.train_file):
+            print('Processing data...')
             images, measurements = self._process_data()
             self._save_pickle(images, measurements)
+        else:
+            print('Training file exists, loading...')
+            images, measurements = self._read_pickle()
         
         return images, measurements
     
@@ -51,7 +56,6 @@ class DataLoader():
     def _process_data(self):
         
         images, measurements = self._load_data_log()
-        images, measurements = self._pack_left_right(images, measurements)
         images, measurements = self._flip_images(images, measurements)
         
         return images, measurements
@@ -64,39 +68,32 @@ class DataLoader():
         with open(self.log_file) as csvfile:
             reader = csv.reader(csvfile)
             for line in tqdm(reader, unit = ' lines', desc = 'CSV Processing'):
-                # Win vs linux separator from the simulator
-                if line[0].find("/") > -1:
-                    sep = '/'
-                else:
-                    sep = '\\'
-                center_img = line[0].split(sep)[-1]
-                left_img = line[1].split(sep)[-1]
-                right_img = line[2].split(sep)[-1]
-                steering_angle, throttle, break_force = line[3:6]
-                images.append((center_img, left_img, right_img))
-                measurements.append((float(steering_angle), float(throttle), float(break_force)))
+                line_images, line_measurements = self._parse_line(line)
+
+                images.extend(line_images)
+                measurements.extend(line_measurements)
                 
         return np.array(images), np.array(measurements)
 
-    def _pack_left_right(self, images, measurements):
-        
-        new_images = []
-        new_measurements = []
-        
-        for image, measurement in tqdm(zip(images, measurements), unit = ' images', desc = 'Left/Right Processing'):
-            _, left_img, right_img = image
-            steering_angle, throttle, break_force = measurement
+    def _parse_line(self, line):
 
-            new_images.append(left_img)
-            new_measurements.append((steering_angle + self.angle_correction, throttle, break_force))
+        images = []
+        measurements = []
 
-            new_images.append(right_img)
-            new_measurements.append((steering_angle - self.angle_correction, throttle, break_force))
-        
-        images_out = np.append(images[:,0], new_images, axis = 0)
-        measurements_out = np.append(measurements, new_measurements, axis = 0)
-        
-        return images_out, measurements_out
+        center_img, left_img, right_img = [img.split(self.path_separator)[-1] for img in line[0:3]]
+        steering_angle, throttle, break_force = [float(value) for value in line[3:6]]
+
+        # Center image
+        images.append(center_img)
+        measurements.append((steering_angle, throttle, break_force))
+        # Left image
+        images.append(left_img)
+        measurements.append((steering_angle + self.angle_correction, throttle, break_force))
+        # Right image
+        images.append(right_img)
+        measurements.append((steering_angle - self.angle_correction, throttle, break_force))
+
+        return images, measurements
 
     def _flip_images(self, images, measurements):
         
@@ -105,12 +102,13 @@ class DataLoader():
         
         for image, measurement in zip(tqdm(images, unit=' images', desc='Flipping'), measurements):
             steering_angle, throttle, break_force = measurement
-            img = cv2.imread(os.path.join(self.img_folder, image))
-            img_flipped = cv2.flip(img, 1)
-            img_filpped_name = 'flipped_' + image
-            cv2.imwrite(os.path.join(self.img_folder, img_filpped_name), img_flipped)
-            new_images.append(img_filpped_name)
-            new_measurements.append((-steering_angle, throttle, break_force))
+            if steering_angle >= self.flip_min_angle or steering_angle <= -self.flip_min_angle:
+                img = cv2.imread(os.path.join(self.img_folder, image))
+                img_flipped = cv2.flip(img, 1)
+                img_filpped_name = 'flipped_' + image
+                cv2.imwrite(os.path.join(self.img_folder, img_filpped_name), img_flipped)
+                new_images.append(img_filpped_name)
+                new_measurements.append((-steering_angle, throttle, break_force))
         
         images_out = np.append(images, new_images, axis = 0)
         measurements_out = np.append(measurements, new_measurements, axis = 0)
