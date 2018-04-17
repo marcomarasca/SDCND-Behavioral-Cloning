@@ -6,13 +6,14 @@ import pickle
 from image_processor import process_image
 from sklearn.utils import shuffle
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 class DataLoader():
 
     def __init__(self, train_file, log_file, img_folder, 
                  angle_correction = 0.2, 
                  path_separator = '\\',
-                 flip_min_angle = 0.25):
+                 flip_min_angle = 0.0):
         self.train_file = train_file
         self.log_file = log_file
         self.img_folder = img_folder
@@ -31,7 +32,7 @@ class DataLoader():
         
         return images, measurements
     
-    def generator(self, images, measurements, batch_size = 128):
+    def generator(self, images, measurements, batch_size = 64):
         
         num_samples = len(images)
         
@@ -47,6 +48,15 @@ class DataLoader():
                 Y_batch = measurements_batch[:,0] # Takes the steering angle only, for now
                 
                 yield X_batch, Y_batch
+
+    def plot_distribution(self, data, title, save_path = None, bins = 21, show = True):
+        plt.figure(figsize = (15, 6))
+        plt.hist(data, bins = bins)
+        plt.title(title)
+        if save_path:
+            plt.savefig(save_path)
+        if show:
+            plt.show()
 
     def _load_image(self, image_file):
         img = cv2.imread(os.path.join(self.img_folder, image_file))
@@ -92,6 +102,8 @@ class DataLoader():
         # Right image
         images.append(right_img)
         measurements.append((steering_angle - self.angle_correction, throttle, break_force))
+        # Clips the angles to the right interval (-1, 1)
+        measurements = np.clip(measurements, a_min = -1.0, a_max = 1.0)
 
         return images, measurements
 

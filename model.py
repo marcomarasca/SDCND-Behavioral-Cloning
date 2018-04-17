@@ -76,7 +76,6 @@ def plot_history(model_name, history):
     
     train_log = history.history['loss']
     valid_log = history.history['val_loss']
-    print(history.history)
     
     train_loss = train_log[-1]
     valid_loss = valid_log[-1]
