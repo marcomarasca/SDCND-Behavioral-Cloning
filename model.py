@@ -14,7 +14,7 @@ from sklearn.utils import shuffle
 from sklearn.model_selection import train_test_split
 
 from keras.models import Model
-from keras.layers import Input, Lambda, Dense, Flatten, Convolution2D, Dropout
+from keras.layers import Input, Lambda, Dense, Flatten, Convolution2D, Dropout, Activation, BatchNormalization
 from keras.optimizers import Adam
 from keras.callbacks import TensorBoard, EarlyStopping
 
@@ -36,14 +36,31 @@ flags = tf.app.flags
 FLAGS = flags.FLAGS
 
 # command line flags
-flags.DEFINE_integer('epochs', 3, "The number of epochs.")
+flags.DEFINE_integer('epochs', 15, "The number of epochs.")
 flags.DEFINE_integer('batch_size', 64, "The batch size.")
-flags.DEFINE_float('learning_rate', 0.001, "The learning rate.")
+flags.DEFINE_float('learning_rate', 0.0001, "The learning rate.")
 flags.DEFINE_string('loss', 'mse', 'The loss function')
 flags.DEFINE_float('dropout', 0.2, 'The dropout probabilty')
 flags.DEFINE_string('activation', 'relu', 'The activation function')
+flags.DEFINE_float('batch_norm', 0.0, 'The batch norm momentum, if 0 batch norm is not applied')
 
-def build_model(input_shape, dropout_prob = FLAGS.dropout, activation = FLAGS.activation):
+def fully_connected(x, output_size, batch_norm, dropout_prob, activation):
+    """
+    Builds a fully connected layer with the given input, with batch normalization and dropout
+    """
+    x = Dense(output_size)(x)
+
+    if batch_norm > 0:
+        x = BatchNormalization(momentum = batch_norm)(x)
+
+    x = Activation(activation)(x)
+
+    if dropout_prob > 0:
+        x = Dropout(p = dropout_prob)(x)
+
+    return x
+
+def build_model(input_shape, dropout_prob = FLAGS.dropout, activation = FLAGS.activation, batch_norm = FLAGS.batch_norm):
     '''
     Defines the keras model based on the Nvidia end-to-end paper: https://arxiv.org/pdf/1604.07316v1.pdf
     '''
@@ -64,11 +81,11 @@ def build_model(input_shape, dropout_prob = FLAGS.dropout, activation = FLAGS.ac
 
     # Flatten
     x = Flatten()(x) # 1152
-    x = Dropout(p = dropout_prob)(x)
     
-    x = Dense(100, activation = activation)(x)
-    x = Dense(50, activation = activation)(x)
-    x = Dense(10, activation = activation)(x)
+    # Fully conected layers with batch normalization and dropout
+    x = fully_connected(x, 100, batch_norm, dropout_prob, activation)
+    x = fully_connected(x, 50, batch_norm, dropout_prob, activation)
+    x = fully_connected(x, 10, batch_norm, dropout_prob, activation)
 
     # The output is the steering angle
     model_out = Dense(1)(x)
@@ -100,8 +117,9 @@ def plot_history(model_name, history):
     ax1.plot(x, train_log, label='Train Loss', color = c1)
     ax1.plot(x, valid_log, label='Validation Loss', color = c2)
     
-    plt.title("{} (EP: {}, BS: {}, LR: {}, KP: {})".format(
-        model_name, FLAGS.epochs, FLAGS.batch_size, FLAGS.learning_rate, FLAGS.dropout
+    plt.title("{} (EP: {}, BS: {}, LR: {}, DO: {}, BN: {})".format(
+        model_name, FLAGS.epochs, FLAGS.batch_size, FLAGS.learning_rate, FLAGS.dropout,
+        '{}'.format(FLAGS.batch_norm if FLAGS.batch_norm > 0 else 'OFF')
     ))
     
     fig.text(0.5, 0, text,
@@ -154,8 +172,10 @@ def main(_):
     
     model_name = 'model_{}'.format(date_time_str)
 
-    print('Training {} on {} samples (EP: {}, BS: {}, LR: {}, DO: {}, A: {}, L: {})...'.format(
-        model_name, X_train.shape[0], FLAGS.epochs, FLAGS.batch_size, FLAGS.learning_rate, FLAGS.dropout, FLAGS.activation, FLAGS.loss
+    print('Training {} on {} samples (EP: {}, BS: {}, LR: {}, DO: {}, BN: {}, A: {}, L: {})...'.format(
+        model_name, X_train.shape[0], FLAGS.epochs, FLAGS.batch_size, FLAGS.learning_rate, FLAGS.dropout, 
+        '{}'.format(FLAGS.batch_norm if FLAGS.batch_norm > 0 else 'OFF'),
+        FLAGS.activation, FLAGS.loss
     ))
     
     history = model.fit_generator(train_generator, 
