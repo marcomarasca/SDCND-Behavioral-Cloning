@@ -6,6 +6,8 @@ import pickle
 from image_processor import process_image
 from sklearn.utils import shuffle
 from tqdm import tqdm
+import matplotlib as mpl
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 
 class DataLoader():
@@ -49,14 +51,12 @@ class DataLoader():
                 
                 yield X_batch, Y_batch
 
-    def plot_distribution(self, data, title, save_path = None, bins = 21, show = True):
+    def plot_distribution(self, data, title, save_path = None, bins = 21):
         plt.figure(figsize = (15, 6))
         plt.hist(data, bins = bins)
         plt.title(title)
         if save_path:
             plt.savefig(save_path)
-        if show:
-            plt.show()
 
     def _load_image(self, image_file):
         img = cv2.imread(os.path.join(self.img_folder, image_file))

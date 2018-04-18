@@ -2,6 +2,8 @@ import os
 import time
 
 import tensorflow as tf
+import matplotlib as mpl
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -39,8 +41,9 @@ flags.DEFINE_integer('batch_size', 64, "The batch size.")
 flags.DEFINE_float('learning_rate', 0.001, "The learning rate.")
 flags.DEFINE_string('loss', 'mse', 'The loss function')
 flags.DEFINE_float('dropout', 0.2, 'The dropout probabilty')
+flags.DEFINE_string('activation', 'relu', 'The activation function')
 
-def build_model(input_shape, dropout_prob = FLAGS.dropout, activation = 'relu'):
+def build_model(input_shape, dropout_prob = FLAGS.dropout, activation = FLAGS.activation):
     '''
     Defines the keras model based on the Nvidia end-to-end paper: https://arxiv.org/pdf/1604.07316v1.pdf
     '''
@@ -112,9 +115,7 @@ def plot_history(model_name, history):
     fig.legend(handles, labels, loc = (0.7, 0.5))
     fig.tight_layout()
     
-    fig.savefig(os.path.join('models', model_name), bbox_inches = 'tight')
-    
-    #plt.show()
+    fig.savefig(os.path.join('models', model_name), bbox_inches = 'tight') 
 
 def main(_):
     data_loader = DataLoader(TRAIN_FILE, LOG_FILE, IMG_DIR)
@@ -151,8 +152,10 @@ def main(_):
                     mode = 'min')
     ]
     
-    print('Training on {} samples (EP: {}, BS: {}, LR: {}, DO: {})...'.format(
-        X_train.shape[0], FLAGS.epochs, FLAGS.batch_size, FLAGS.learning_rate, FLAGS.dropout
+    model_name = 'model_{}'.format(date_time_str)
+
+    print('Training {} on {} samples (EP: {}, BS: {}, LR: {}, DO: {}, A: {}, L: {})...'.format(
+        model_name, X_train.shape[0], FLAGS.epochs, FLAGS.batch_size, FLAGS.learning_rate, FLAGS.dropout, FLAGS.activation, FLAGS.loss
     ))
     
     history = model.fit_generator(train_generator, 
@@ -161,8 +164,6 @@ def main(_):
                                   validation_data = valid_generator,
                                   nb_val_samples = X_valid.shape[0],
                                   callbacks = callbacks)
-
-    model_name = 'model_{}'.format(date_time_str)
 
     model.save(os.path.join(MODELS_DIR, model_name + '.h5'))
 
