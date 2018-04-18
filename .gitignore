@@ -7,3 +7,5 @@ model_*.h5
 model_*.png
 nohup.out
 run.sh
+tmp/
+data.zip

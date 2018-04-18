@@ -3,12 +3,11 @@ import csv
 import numpy as np
 import cv2
 import pickle
+
 from image_processor import process_image
 from sklearn.utils import shuffle
+from sklearn.model_selection import train_test_split
 from tqdm import tqdm
-import matplotlib as mpl
-mpl.use('Agg')
-import matplotlib.pyplot as plt
 
 class DataLoader():
     """
@@ -29,7 +28,7 @@ class DataLoader():
     def __init__(self, train_file, log_file, img_folder,
                  path_separator = '\\',
                  angle_correction = 0.1, 
-                 normalize_factor = 2.5,
+                 normalize_factor = 2,
                  flip_min_angle = 0.0):
         """
         Initializes the data loader with the given paths to use in order to generate
@@ -41,11 +40,11 @@ class DataLoader():
             img_folder: The path where the images referenced in the log file are stored
             angle_correction: Optional, if supplied the left and right cameras images are read from
                               the log file and added to the dataset, applying the given correction angle
-            normalize_factor: Optional, Cuts off from the dataset the spikes that go over a certain factor of the mean
             flip_min_angle: Optional, if supplied extends the dataset applying horizontal flipping to the images.
                             The value specifies the min steering angle for which the image is flipped (e.g. a value of
                             0 will flip all the images, a value of 0.2 flips the images where the steering angle is more than
                             0.2 or -0.2)
+            normalize_factor: Optional, cuts off from the dataset the spikes that go over a certain factor of the mean
         """
         self.train_file = train_file
         self.log_file = log_file
@@ -56,6 +55,18 @@ class DataLoader():
         self.flip_min_angle = flip_min_angle
 
     def load_dataset(self, regenerate = False):
+        """
+        Loads the dataset form a pickle (train) file if present, otherwise regenerate the dataset from the log file and saves it
+        to the pickle (train) file.
+
+        Parameters
+            regenerate: If True forces the regeneration of the dataset from the log file even when the pickle
+                        file is present, note that the pickle file will be overriden
+        Returns
+            (images, measurements): The images contains the name of the image, the measurements is an array of
+                                    triples (steering_angle, throttle, break_force)
+        """
+
         if regenerate or not os.path.isfile(self.train_file):
             print('Processing data...')
             images, measurements = self._process_data()
@@ -67,6 +78,10 @@ class DataLoader():
         return images, measurements
     
     def generator(self, images, measurements, batch_size = 64):
+        """
+        Returns a generators over the given image (names) and measurements with the given batch size. Only the steering_angle
+        is included in each batch. The images returned are ready to be fed to the model as they are processed by the generator.
+        """
         
         num_samples = len(images)
         
@@ -81,38 +96,50 @@ class DataLoader():
                 X_batch = np.array(list(map(self._load_image, images_batch)))
                 Y_batch = measurements_batch[:,0] # Takes the steering angle only, for now
                 
-                yield X_batch, Y_batch
+                yield shuffle(X_batch, Y_batch)
 
-    def plot_distribution(self, data, title, bins = 'auto', save_path = None, show = False):
-        fig = plt.figure(figsize = (15, 6))
-        plt.hist(data, bins = bins)
-        plt.title(title)
-        fig.text(0.9, 0.9, '{} measurements'.format(len(data)),
-                verticalalignment='top', 
-                horizontalalignment='center',
-                color = 'black', fontsize = 12)
-        plt.tight_layout()
-        if save_path:
-            plt.savefig(save_path)
-        if show:
-            plt.show()
+    def split_train_test(self, images, measurements, test_size = 0.3):
+        """
+        Splits the given sets in train and validation dataset, the validation dataset will contain only images from the
+        original 'center' camera and its flipped version.
+        """
+        X_train, X_valid, Y_train, Y_valid = train_test_split(images, measurements, test_size = test_size)
+        
+        valid_drop = []
 
-    def _load_image(self, image_file):
-        img = cv2.imread(os.path.join(self.img_folder, image_file))
-        img = process_image(img)
-        return img
-   
+        for i, image in enumerate(X_valid):
+            # Keeps in the validation set only center and flipped since left and right are
+            # an approximation
+            if image.startswith('left') or image.startswith('right'):
+                valid_drop.append(i)
+
+        # Puts back into the training set the images not used in validation
+        X_train = np.concatenate((X_train, np.take(X_valid, valid_drop, axis = 0)))
+        Y_train = np.concatenate((Y_train, np.take(Y_valid, valid_drop, axis = 0)))
+
+        # Removes from the validation set the dropped images
+        X_valid = np.delete(X_valid, valid_drop, axis = 0)
+        Y_valid = np.delete(Y_valid, valid_drop, axis = 0)
+        
+        return X_train, X_valid, Y_train, Y_valid    
+
     def _process_data(self):
         
         images, measurements = self._load_data_log()
+       
+        if self.flip_min_angle is not None:
+            images, measurements = self._flip_images(images, measurements)
 
         if self.normalize_factor is not None:
             images, measurements = self._normalize(images, measurements)
-
-        if self.flip_min_angle is not None:
-            images, measurements = self._flip_images(images, measurements)
         
-        return images, measurements
+        return images, measurements        
+
+    def _load_image(self, image_file):
+        img = cv2.imread(os.path.join(self.img_folder, image_file))
+        # Process the image with the image_processor
+        img = process_image(img)
+        return img    
 
     def _load_data_log(self):
         
@@ -130,7 +157,10 @@ class DataLoader():
         return np.array(images), np.array(measurements)
 
     def _parse_line(self, line):
-
+        """
+        Parses a line from the simulator log, if the self.angle_correction is specified extends the line with the
+        left and right camera view applying the self.angle_correction.
+        """
         images = []
         measurements = []
 
@@ -154,6 +184,11 @@ class DataLoader():
         return images, measurements
 
     def _normalize(self, images, measurements):
+        """
+        Simple normalization of the dataset that cuts down the number of samples where the steering angle is too frequent.
+        This implementation simply uses np.histogram to get a set of bins where the steering angles are split and the mean
+        is computed over the values in the bins. The bins that have more than mean * self.normalize_factor are trimmed.
+        """
         angles = measurements[:,0]
         values, bins = np.histogram(angles, bins = 'auto')
         max_wanted = (np.mean(values) * self.normalize_factor).astype('uint32')
@@ -168,7 +203,8 @@ class DataLoader():
             else:
                 bin_angles = np.where((angles >= bin_left) & (angles < bin_right))
             if (len(bin_angles[0]) > max_wanted):
-                drop_idx = np.random.choice(bin_angles[0], size = len(bin_angles[0]) - max_wanted, replace = False)
+                drop_num = len(bin_angles[0]) - max_wanted
+                drop_idx = np.random.choice(bin_angles[0], size = drop_num, replace = False)
                 drop.extend(drop_idx)
 
         norm_images = np.delete(images, drop, axis = 0)

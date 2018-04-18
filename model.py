@@ -1,23 +1,18 @@
 import os
 import time
-
 import tensorflow as tf
-import matplotlib as mpl
-mpl.use('Agg')
-import matplotlib.pyplot as plt
 import numpy as np
+import plots
 
+from app_args import FLAGS
 from data_loader import DataLoader
 from image_processor import output_shape
 
-from sklearn.utils import shuffle
-from sklearn.model_selection import train_test_split
-
+# Keras
 from keras.models import Model
 from keras.layers import Input, Lambda, Dense, Flatten, Convolution2D, Dropout, Activation, BatchNormalization
 from keras.optimizers import Adam
 from keras.callbacks import TensorBoard, EarlyStopping
-
 
 DATA_DIR   = 'data'
 TRAIN_FILE = os.path.join(DATA_DIR, 'train.p')
@@ -32,19 +27,7 @@ if not os.path.isdir(LOGS_DIR):
 if not os.path.isdir(MODELS_DIR):
     os.makedirs(MODELS_DIR)
 
-flags = tf.app.flags
-FLAGS = flags.FLAGS
-
-# command line flags
-flags.DEFINE_integer('epochs', 15, "The number of epochs.")
-flags.DEFINE_integer('batch_size', 64, "The batch size.")
-flags.DEFINE_float('learning_rate', 0.0001, "The learning rate.")
-flags.DEFINE_string('loss', 'mse', 'The loss function')
-flags.DEFINE_float('dropout', 0.2, 'The dropout probabilty')
-flags.DEFINE_string('activation', 'relu', 'The activation function')
-flags.DEFINE_float('batch_norm', 0.0, 'The batch norm momentum, if 0 batch norm is not applied')
-
-def fully_connected(x, output_size, batch_norm, dropout_prob, activation):
+def fully_connected(x, output_size, dropout_prob, batch_norm, activation):
     """
     Builds a fully connected layer with the given input, with batch normalization and dropout
     """
@@ -83,57 +66,14 @@ def build_model(input_shape, dropout_prob = FLAGS.dropout, activation = FLAGS.ac
     x = Flatten()(x) # 1152
     
     # Fully conected layers with batch normalization and dropout
-    x = fully_connected(x, 100, batch_norm, dropout_prob, activation)
-    x = fully_connected(x, 50, batch_norm, dropout_prob, activation)
-    x = fully_connected(x, 10, batch_norm, dropout_prob, activation)
+    x = fully_connected(x, 100, dropout_prob, batch_norm, activation)
+    x = fully_connected(x, 50, 0, batch_norm, activation)
+    x = fully_connected(x, 10, 0, batch_norm, activation)
 
     # The output is the steering angle
     model_out = Dense(1)(x)
 
     return Model(input = model_in, output = model_out)
-
-def plot_history(model_name, history):
-    
-    train_log = history.history['loss']
-    valid_log = history.history['val_loss']
-    
-    train_loss = train_log[-1]
-    valid_loss = valid_log[-1]
-    
-    text = 'Training/Validation Loss: {:.3f} / {:.3f}'.format(train_loss, valid_loss)
-    
-    colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
-    
-    c1 = colors[0]
-    c2 = colors[1]
-    
-    fig, ax1 = plt.subplots(figsize=(9, 6))
-    
-    ax1.set_xlabel('Epochs')    
-    ax1.set_ylabel('Loss')
-
-    x = np.arange(1, len(train_log) + 1)
-    
-    ax1.plot(x, train_log, label='Train Loss', color = c1)
-    ax1.plot(x, valid_log, label='Validation Loss', color = c2)
-    
-    plt.title("{} (EP: {}, BS: {}, LR: {}, DO: {}, BN: {})".format(
-        model_name, FLAGS.epochs, FLAGS.batch_size, FLAGS.learning_rate, FLAGS.dropout,
-        '{}'.format(FLAGS.batch_norm if FLAGS.batch_norm > 0 else 'OFF')
-    ))
-    
-    fig.text(0.5, 0, text,
-                verticalalignment='top', 
-                horizontalalignment='center',
-                color='black', fontsize=10)
-    
-    
-    handles, labels = ax1.get_legend_handles_labels()
-    
-    fig.legend(handles, labels, loc = (0.7, 0.5))
-    fig.tight_layout()
-    
-    fig.savefig(os.path.join('models', model_name), bbox_inches = 'tight') 
 
 def main(_):
     data_loader = DataLoader(TRAIN_FILE, LOG_FILE, IMG_DIR)
@@ -143,12 +83,13 @@ def main(_):
     print('Total samples: {}'.format(images.shape[0]))
 
     # Split in training and validation
-    X_train, X_valid, Y_train, Y_valid = train_test_split(images, measurements, 
-                                                          test_size = 0.2, 
-                                                          random_state = 13)
+    X_train, X_valid, Y_train, Y_valid = data_loader.split_train_test(images, measurements)
 
     print('Training samples: {}'.format(X_train.shape[0]))
     print('Validation samples: {}'.format(X_valid.shape[0]))
+
+    plots.plot_distribution(Y_train[:,0], 'Training set distribution', save_path = os.path.join('images', 'train_distribution'))
+    plots.plot_distribution(Y_valid[:,0], 'Validation set distribution', save_path = os.path.join('images', 'valid_distribution'))
 
     train_generator = data_loader.generator(X_train, Y_train, FLAGS.batch_size)
     valid_generator = data_loader.generator(X_valid, Y_valid, FLAGS.batch_size)
@@ -160,10 +101,12 @@ def main(_):
     date_time_str = time.strftime('%Y%m%d-%H%M%S')
 
     callbacks = [
+        # To be used with tensorboard, creates the logs for the losses in the logs dir
         TensorBoard(log_dir = os.path.join(LOGS_DIR, date_time_str), 
                     histogram_freq = 0,
                     write_graph = False,
                     write_images = False),
+        # Early stopping guard
         EarlyStopping(monitor='val_loss', 
                     patience = 3,
                     verbose = 0, 
@@ -178,6 +121,7 @@ def main(_):
         FLAGS.activation, FLAGS.loss
     ))
     
+    # Train the model
     history = model.fit_generator(train_generator, 
                                   nb_epoch = FLAGS.epochs,
                                   samples_per_epoch = X_train.shape[0],
@@ -187,7 +131,7 @@ def main(_):
 
     model.save(os.path.join(MODELS_DIR, model_name + '.h5'))
 
-    plot_history(model_name, history)
+    plots.plot_history(model_name, history)
 
 if __name__ == '__main__':
     tf.app.run()
