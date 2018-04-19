@@ -19,17 +19,17 @@ class DataLoader():
     Optionally extends the images with right and left cameras view applying a correction to
     the measured angle.
 
-    Optionally normalizes the dataset to cut off spikes of data.
-
     Optionally extends the dataset flipping the images horizontally (and inverting the angle)
+
+    Optionally normalizes the dataset to cut off spikes of data.
     
     """
 
     def __init__(self, train_file, log_file, img_folder,
                  path_separator = '\\',
-                 angle_correction = 0.1, 
-                 normalize_factor = 2,
-                 flip_min_angle = 0.0):
+                 angle_correction = 0.1,
+                 flip_min_angle = 0.0, 
+                 normalize_factor = 2):
         """
         Initializes the data loader with the given paths to use in order to generate
         the extended dataset.
@@ -51,8 +51,8 @@ class DataLoader():
         self.img_folder = img_folder
         self.path_separator = path_separator
         self.angle_correction = angle_correction
-        self.normalize_factor = normalize_factor
         self.flip_min_angle = flip_min_angle
+        self.normalize_factor = normalize_factor
 
     def load_dataset(self, regenerate = False):
         """
@@ -77,24 +77,39 @@ class DataLoader():
         
         return images, measurements
     
-    def generator(self, images, measurements, batch_size = 64):
+    def generator(self, images, measurements, batch_size = 64, preprocess = True):
         """
         Returns a generators over the given image (names) and measurements with the given batch size. Only the steering_angle
         is included in each batch. The images returned are ready to be fed to the model as they are processed by the generator.
+
+        Parameters
+            images: The set of image names
+            measurements: The associated measurements
+            batch_size: The size of the batches to yield
+            preprocess: If True preprocess all the images in memory before creating the batches, this speeds speeds up considerably
+                        the training but requires a lot more memory
         """
         
         num_samples = len(images)
         
         assert(num_samples == len(measurements))
+
+        if preprocess:
+            # Preprocess all the images before generating batches
+            images = np.array(list(map(self._load_image, images)))
+
+        # Takes only the steering angle for now
+        measurements = measurements[:,0]
         
         while True:
             images, measurements = shuffle(images, measurements)
             for offset in range(0, num_samples, batch_size):
-                images_batch = images[offset:offset + batch_size]
-                measurements_batch = measurements[offset:offset + batch_size]
-                
-                X_batch = np.array(list(map(self._load_image, images_batch)))
-                Y_batch = measurements_batch[:,0] # Takes the steering angle only, for now
+
+                X_batch = images[offset:offset + batch_size]
+                Y_batch = measurements[offset:offset + batch_size]
+
+                if not preprocess:
+                    X_batch = np.array(list(map(self._load_image, X_batch)))
                 
                 yield shuffle(X_batch, Y_batch)
 
@@ -219,7 +234,7 @@ class DataLoader():
         
         for image, measurement in zip(tqdm(images, unit=' images', desc='Flipping'), measurements):
             steering_angle, throttle, break_force = measurement
-            if steering_angle >= self.flip_min_angle or steering_angle <= -self.flip_min_angle:
+            if abs(steering_angle) >= self.flip_min_angle:
                 img_filpped_name = 'flipped_' + image
                 img_flipped_path = os.path.join(self.img_folder, img_filpped_name)
                 # if the images has been flipped already no need to reprocess it
