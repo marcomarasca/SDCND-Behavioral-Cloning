@@ -3,8 +3,8 @@ import csv
 import numpy as np
 import cv2
 import pickle
+import image_processor as ip
 
-from image_processor import process_image
 from sklearn.utils import shuffle
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
@@ -19,7 +19,7 @@ class DataLoader():
     Optionally extends the images with right and left cameras view applying a correction to
     the measured angle.
 
-    Optionally extends the dataset flipping the images horizontally (and inverting the angle)
+    Optionally extends the dataset mirroring the images horizontally (and inverting the angle)
 
     Optionally normalizes the dataset to cut off spikes of data.
     
@@ -27,9 +27,10 @@ class DataLoader():
 
     def __init__(self, train_file, log_file, img_folder,
                  path_separator = '\\',
-                 angle_correction = 0.1,
-                 flip_min_angle = 0.0, 
-                 normalize_factor = 2):
+                 angle_correction = 0.15,
+                 mirror_min_angle = 0.0, 
+                 normalize_factor = 1.5,
+                 normalize_bins = 'auto'):
         """
         Initializes the data loader with the given paths to use in order to generate
         the extended dataset.
@@ -40,19 +41,21 @@ class DataLoader():
             img_folder: The path where the images referenced in the log file are stored
             angle_correction: Optional, if supplied the left and right cameras images are read from
                               the log file and added to the dataset, applying the given correction angle
-            flip_min_angle: Optional, if supplied extends the dataset applying horizontal flipping to the images.
-                            The value specifies the min steering angle for which the image is flipped (e.g. a value of
-                            0 will flip all the images, a value of 0.2 flips the images where the steering angle is more than
+            mirror_min_angle: Optional, if supplied extends the dataset applying horizontal mirroring to the images.
+                            The value specifies the min steering angle for which the image is mirrored (e.g. a value of
+                            0 will mirror all the images, a value of 0.2 mirrors the images where the steering angle is more than
                             0.2 or -0.2)
-            normalize_factor: Optional, cuts off from the dataset the spikes that go over a certain factor of the mean
+            normalize_factor: Optional, if supplied cuts off from the dataset the spikes that go over a certain factor of the mean
+            normalize_bins: The number of histogram bins to use when normalizing
         """
         self.train_file = train_file
         self.log_file = log_file
         self.img_folder = img_folder
         self.path_separator = path_separator
         self.angle_correction = angle_correction
-        self.flip_min_angle = flip_min_angle
+        self.mirror_min_angle = mirror_min_angle
         self.normalize_factor = normalize_factor
+        self.normalize_bins = normalize_bins
 
     def load_dataset(self, regenerate = False):
         """
@@ -68,16 +71,20 @@ class DataLoader():
         """
 
         if regenerate or not os.path.isfile(self.train_file):
-            print('Processing data...')
+            print('Processing data (AC: {}, MA: {}, NF: {})...'.format(
+                self.angle_correction, self.mirror_min_angle, self.normalize_factor
+            ))
             images, measurements = self._process_data()
             self._save_pickle(images, measurements)
         else:
-            print('Training file exists, loading...')
-            images, measurements = self._read_pickle()
+            images, measurements = self._load_pickle()
+            print('Data read from pickle file {} (AC: {}, MA: {}, NF: {})'.format(
+                self.train_file, self.angle_correction, self.mirror_min_angle, self.normalize_factor
+            ))
         
         return images, measurements
     
-    def generator(self, images, measurements, batch_size = 64, preprocess = True):
+    def generator(self, images, measurements, batch_size, preprocess = True, random_transform = False):
         """
         Returns a generators over the given image (names) and measurements with the given batch size. Only the steering_angle
         is included in each batch. The images returned are ready to be fed to the model as they are processed by the generator.
@@ -88,6 +95,7 @@ class DataLoader():
             batch_size: The size of the batches to yield
             preprocess: If True preprocess all the images in memory before creating the batches, this speeds speeds up considerably
                         the training but requires a lot more memory
+            random_transform: If True applies a set of random transformations, set to False for the testing generator
         """
         
         num_samples = len(images)
@@ -97,8 +105,8 @@ class DataLoader():
         if preprocess:
             # Preprocess all the images before generating batches
             images = np.array(list(map(self._load_image, images)))
-
-        # Takes only the steering angle for now
+        
+        # Takes only the steering angle from the measurements
         measurements = measurements[:,0]
         
         while True:
@@ -110,51 +118,46 @@ class DataLoader():
 
                 if not preprocess:
                     X_batch = np.array(list(map(self._load_image, X_batch)))
+
+                if random_transform:
+                    X_batch, Y_batch = self._random_transform(X_batch, Y_batch)
                 
                 yield shuffle(X_batch, Y_batch)
 
-    def split_train_test(self, images, measurements, test_size = 0.3):
-        """
-        Splits the given sets in train and validation dataset, the validation dataset will contain only images from the
-        original 'center' camera and its flipped version.
-        """
-        X_train, X_valid, Y_train, Y_valid = train_test_split(images, measurements, test_size = test_size)
-        
-        valid_drop = []
-
-        for i, image in enumerate(X_valid):
-            # Keeps in the validation set only center and flipped since left and right are
-            # an approximation
-            if image.startswith('left') or image.startswith('right'):
-                valid_drop.append(i)
-
-        # Puts back into the training set the images not used in validation
-        X_train = np.concatenate((X_train, np.take(X_valid, valid_drop, axis = 0)))
-        Y_train = np.concatenate((Y_train, np.take(Y_valid, valid_drop, axis = 0)))
-
-        # Removes from the validation set the dropped images
-        X_valid = np.delete(X_valid, valid_drop, axis = 0)
-        Y_valid = np.delete(Y_valid, valid_drop, axis = 0)
-        
-        return X_train, X_valid, Y_train, Y_valid    
+    def split_train_test(self, images, measurements, test_size = 0.2):
+        return train_test_split(images, measurements, test_size = test_size, random_state = 42)
 
     def _process_data(self):
         
         images, measurements = self._load_data_log()
        
-        if self.flip_min_angle is not None:
-            images, measurements = self._flip_images(images, measurements)
+        if self.mirror_min_angle is not None:
+            images, measurements = self._mirror_images(images, measurements)
 
         if self.normalize_factor is not None:
             images, measurements = self._normalize(images, measurements)
         
-        return images, measurements        
+        return images, measurements
+
+    def _random_transform(self, images, angles):
+        processed_images = []
+        processed_angles = []
+
+        for img, angle in zip(images, angles):
+            rnd_factor = np.random.uniform(0.5, 1.5)
+            img = ip.adjust_image_brightness(img, factor = rnd_factor)
+            rnd_x = np.random.randint(-15, 15)
+            img = ip.translate_image(img, x = rnd_x)
+            angle = angle + rnd_x * 0.002
+            processed_images.append(img)
+            processed_angles.append(angle)
+
+        return np.array(processed_images), np.array(processed_angles)
 
     def _load_image(self, image_file):
         img = cv2.imread(os.path.join(self.img_folder, image_file))
-        # Process the image with the image_processor
-        img = process_image(img)
-        return img    
+        img = ip.process_image(img)
+        return img
 
     def _load_data_log(self):
         
@@ -205,7 +208,7 @@ class DataLoader():
         is computed over the values in the bins. The bins that have more than mean * self.normalize_factor are trimmed.
         """
         angles = measurements[:,0]
-        values, bins = np.histogram(angles, bins = 'auto')
+        values, bins = np.histogram(angles, bins = self.normalize_bins)
         max_wanted = (np.mean(values) * self.normalize_factor).astype('uint32')
 
         drop = []
@@ -227,23 +230,23 @@ class DataLoader():
 
         return norm_images, norm_measurements
 
-    def _flip_images(self, images, measurements):
+    def _mirror_images(self, images, measurements):
         
         new_images = []
         new_measurements = []
         
-        for image, measurement in zip(tqdm(images, unit=' images', desc='Flipping'), measurements):
+        for image, measurement in zip(tqdm(images, unit=' images', desc='Mirroring'), measurements):
             steering_angle, throttle, break_force = measurement
-            if abs(steering_angle) >= self.flip_min_angle:
-                img_filpped_name = 'flipped_' + image
-                img_flipped_path = os.path.join(self.img_folder, img_filpped_name)
-                # if the images has been flipped already no need to reprocess it
-                if not os.path.isfile(img_flipped_path):
+            if abs(steering_angle) >= self.mirror_min_angle:
+                img_mirrored_name = 'mirrored_' + image
+                img_mirrored_path = os.path.join(self.img_folder, img_mirrored_name)
+                # if the image has been mirrored already no need to reprocess it
+                if not os.path.isfile(img_mirrored_path):
                     img_path = os.path.join(self.img_folder, image)
                     img = cv2.imread(img_path)
-                    img_flipped = cv2.flip(img, 1)
-                    cv2.imwrite(img_flipped_path, img_flipped)
-                new_images.append(img_filpped_name)
+                    img_mirrored = cv2.flip(img, 1)
+                    cv2.imwrite(img_mirrored_path, img_mirrored)
+                new_images.append(img_mirrored_name)
                 new_measurements.append((-steering_angle, throttle, break_force))
         
         images_out = np.append(images, new_images, axis = 0)
@@ -251,16 +254,27 @@ class DataLoader():
                             
         return images_out, measurements_out
 
-    def _read_pickle(self):
+    def _load_pickle(self):
+        
         with open(self.train_file, mode='rb') as f:
-            train = pickle.load(f)
-        return train['images'], train['measurements']
+            data = pickle.load(f)
+
+        self.angle_correction = data['angle_correction']
+        self.mirror_min_angle = data['mirror_min_angle']
+        self.normalize_factor = data['normalize_factor']
+
+        return data['images'], data['measurements']
 
     def _save_pickle(self, images, measurements):
-        results = {
+        
+        data = {
             'images': images,
-            'measurements': measurements
+            'measurements': measurements,
+            'angle_correction': self.angle_correction, 
+            'mirror_min_angle': self.mirror_min_angle, 
+            'normalize_factor': self.normalize_factor
         }
+
         with open(self.train_file, 'wb') as f:   
-            pickle.dump(results, f, protocol = pickle.HIGHEST_PROTOCOL)
+            pickle.dump(data, f, protocol = pickle.HIGHEST_PROTOCOL)
 

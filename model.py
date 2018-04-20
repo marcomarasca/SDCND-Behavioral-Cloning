@@ -2,11 +2,11 @@ import os
 import time
 import tensorflow as tf
 import numpy as np
+import image_processor as ip
 import plots
 
 from app_args import FLAGS
 from data_loader import DataLoader
-from image_processor import output_shape
 
 # Keras
 from keras.models import Model
@@ -27,23 +27,20 @@ if not os.path.isdir(LOGS_DIR):
 if not os.path.isdir(MODELS_DIR):
     os.makedirs(MODELS_DIR)
 
-def fully_connected(x, output_size, dropout_prob, batch_norm, activation):
+def fully_connected(x, output_size, activation, batch_norm = None):
     """
     Builds a fully connected layer with the given input, with batch normalization and dropout
     """
     x = Dense(output_size)(x)
 
-    if batch_norm > 0:
+    if batch_norm is not None and batch_norm > 0:
         x = BatchNormalization(momentum = batch_norm)(x)
 
     x = Activation(activation)(x)
 
-    if dropout_prob > 0:
-        x = Dropout(p = dropout_prob)(x)
-
     return x
 
-def build_model(input_shape, dropout_prob = FLAGS.dropout, activation = FLAGS.activation, batch_norm = FLAGS.batch_norm):
+def build_model(input_shape, activation = FLAGS.activation, batch_norm = FLAGS.batch_norm, dropout_prob = FLAGS.dropout):
     '''
     Defines the keras model based on the Nvidia end-to-end paper: https://arxiv.org/pdf/1604.07316v1.pdf
     '''
@@ -66,9 +63,11 @@ def build_model(input_shape, dropout_prob = FLAGS.dropout, activation = FLAGS.ac
     x = Flatten()(x) # 1152
     
     # Fully conected layers with batch normalization and dropout
-    x = fully_connected(x, 100, dropout_prob, batch_norm, activation)
-    x = fully_connected(x, 50, 0, batch_norm, activation)
-    x = fully_connected(x, 10, 0, batch_norm, activation)
+    x = fully_connected(x, 100, activation, batch_norm = batch_norm)
+    x = Dropout(p = dropout_prob)(x)
+
+    x = fully_connected(x, 50, activation, batch_norm = batch_norm)
+    x = fully_connected(x, 10, activation, batch_norm = batch_norm)
 
     # The output is the steering angle
     model_out = Dense(1)(x)
@@ -76,9 +75,20 @@ def build_model(input_shape, dropout_prob = FLAGS.dropout, activation = FLAGS.ac
     return Model(input = model_in, output = model_out)
 
 def main(_):
-    data_loader = DataLoader(TRAIN_FILE, LOG_FILE, IMG_DIR)
 
-    images, measurements = data_loader.load_dataset()
+    print('Configuration PP: {}, R: {}, C: {}, RT: {}'.format(
+        FLAGS.preprocess, 
+        FLAGS.regenerate, 
+        FLAGS.clahe, 
+        FLAGS.random_transform)
+    )
+
+    data_loader = DataLoader(TRAIN_FILE, LOG_FILE, IMG_DIR, 
+                             angle_correction = FLAGS.angle_correction,
+                             mirror_min_angle = FLAGS.mirror_min_angle,
+                             normalize_factor = FLAGS.normalize_factor)
+
+    images, measurements = data_loader.load_dataset(regenerate = FLAGS.regenerate)
 
     print('Total samples: {}'.format(images.shape[0]))
 
@@ -91,10 +101,14 @@ def main(_):
     plots.plot_distribution(Y_train[:,0], 'Training set distribution', save_path = os.path.join('images', 'train_distribution'))
     plots.plot_distribution(Y_valid[:,0], 'Validation set distribution', save_path = os.path.join('images', 'valid_distribution'))
 
-    train_generator = data_loader.generator(X_train, Y_train, FLAGS.batch_size)
-    valid_generator = data_loader.generator(X_valid, Y_valid, FLAGS.batch_size)
+    train_generator = data_loader.generator(X_train, Y_train, FLAGS.batch_size, 
+                                            preprocess = FLAGS.preprocess, 
+                                            random_transform = FLAGS.random_transform)
+    valid_generator = data_loader.generator(X_valid, Y_valid, FLAGS.batch_size, 
+                                            preprocess = FLAGS.preprocess, 
+                                            random_transform = False)
 
-    model = build_model(output_shape())
+    model = build_model(ip.output_shape())
 
     model.compile(optimizer = Adam(lr = FLAGS.learning_rate), loss = FLAGS.loss)
 

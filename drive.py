@@ -17,7 +17,7 @@ import h5py
 from keras import __version__ as keras_version
 
 import cv2
-from image_processor import process_image
+import image_processor as ip
 
 sio = socketio.Server()
 app = Flask(__name__)
@@ -66,7 +66,7 @@ def telemetry(sid, data):
         image_array = np.asarray(image)
 
         # The simulator spits RGB images
-        image_array = process_image(image_array, cs_conv = cv2.COLOR_RGB2YUV)
+        image_array = ip.process_image(image_array, rgb = True)
 
         steering_angle = float(model.predict(image_array[None, :, :, :], batch_size=1))
 
