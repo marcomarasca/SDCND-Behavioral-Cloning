@@ -10,7 +10,7 @@ from data_loader import DataLoader
 
 # Keras
 from keras.models import Model
-from keras.layers import Input, Lambda, Dense, Flatten, Convolution2D, Dropout, Activation, BatchNormalization
+from keras.layers import Input, Lambda, Dense, Flatten, Convolution2D, MaxPooling2D, Dropout, Activation, BatchNormalization
 from keras.optimizers import Adam
 from keras.callbacks import TensorBoard, EarlyStopping
 
@@ -56,11 +56,11 @@ def build_model(input_shape, activation = FLAGS.activation, batch_norm = FLAGS.b
     x = Convolution2D(48, 5, 5, subsample = (2, 2), activation = activation)(x) #  22x5@48
 
     # An adddional two convolutions with smaller filters (filter size 3)
-    x = Convolution2D(64, 3, 3, activation = activation)(x) #20x3@64
-    x = Convolution2D(64, 3, 3, activation = activation)(x) #18x1@64
+    x = Convolution2D(64, 3, 3, activation = activation)(x)                     # 20x3@64
+    x = Convolution2D(64, 3, 3, activation = activation)(x)                     # 18x1@64
 
     # Flatten
-    x = Flatten()(x) # 1152
+    x = Flatten()(x)                                                            # 1152
     
     # Fully conected layers with batch normalization and dropout
     x = fully_connected(x, 100, activation, batch_norm = batch_norm)
@@ -76,17 +76,19 @@ def build_model(input_shape, activation = FLAGS.activation, batch_norm = FLAGS.b
 
 def main(_):
 
-    print('Configuration PP: {}, R: {}, C: {}, RT: {}'.format(
+    print('Configuration PP: {}, R: {}, C: {}, B: {}, RT: {}'.format(
         FLAGS.preprocess, 
         FLAGS.regenerate, 
-        FLAGS.clahe, 
-        FLAGS.random_transform)
-    )
+        FLAGS.clahe,
+        FLAGS.blur,
+        FLAGS.random_transform
+    ))
 
     data_loader = DataLoader(TRAIN_FILE, LOG_FILE, IMG_DIR, 
                              angle_correction = FLAGS.angle_correction,
                              mirror_min_angle = FLAGS.mirror_min_angle,
-                             normalize_factor = FLAGS.normalize_factor)
+                             normalize_factor = FLAGS.normalize_factor,
+                             normalize_bins = FLAGS.normalize_bins)
 
     images, measurements = data_loader.load_dataset(regenerate = FLAGS.regenerate)
 
@@ -108,7 +110,10 @@ def main(_):
                                             preprocess = FLAGS.preprocess, 
                                             random_transform = False)
 
+    
     model = build_model(ip.output_shape())
+
+    print(model.summary())
 
     model.compile(optimizer = Adam(lr = FLAGS.learning_rate), loss = FLAGS.loss)
 

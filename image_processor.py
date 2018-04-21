@@ -10,6 +10,7 @@ class Params(object):
     INPUT_SHAPE = (160, 320, 3)
     CLIP = [60, 25]
     RESIZE = (200, 66)
+    BLUR = FLAGS.blur
     # Contrast Limited Adaptive Histogram Equalization
     CLAHE = cv2.createCLAHE(clipLimit = 2.0, tileGridSize = (8, 8)) if FLAGS.clahe else None
 
@@ -39,6 +40,7 @@ def output_shape(clip = Params.CLIP, resize = Params.RESIZE):
 
 def process_image(img, 
                   rgb = False,
+                  blur = Params.BLUR,
                   clip = Params.CLIP,
                   resize = Params.RESIZE,
                   clahe = Params.CLAHE):
@@ -67,6 +69,8 @@ def process_image(img,
         img = cv2.resize(img, resize, interpolation = cv2.INTER_AREA)
     if clahe is not None:
         img[:, :, 0] = clahe.apply(img[:, :, 0])
+    if blur:
+        img = cv2.GaussianBlur(img, (3, 3), 0)
     
     return img
 

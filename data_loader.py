@@ -56,6 +56,9 @@ class DataLoader():
         self.mirror_min_angle = mirror_min_angle
         self.normalize_factor = normalize_factor
         self.normalize_bins = normalize_bins
+        self.rnd_brightness_range = [-0.5, 1.5]
+        self.rnd_translate_pixels_range = [-15, 15]
+        self.rnd_translate_pixels_fact = 0.01
 
     def load_dataset(self, regenerate = False):
         """
@@ -144,15 +147,18 @@ class DataLoader():
         processed_angles = []
 
         for img, angle in zip(images, angles):
-            rnd_factor = np.random.uniform(0.5, 1.5)
+            rnd_factor = np.random.uniform(self.rnd_brightness_range[0], self.rnd_brightness_range[1])
             img = ip.adjust_image_brightness(img, factor = rnd_factor)
-            rnd_x = np.random.randint(-15, 15)
+            rnd_x = np.random.randint(self.rnd_translate_pixels_range[0], self.rnd_translate_pixels_range[1])
             img = ip.translate_image(img, x = rnd_x)
-            angle = angle + rnd_x * 0.002
+            angle = angle + rnd_x * self.rnd_translate_pixels_fact
             processed_images.append(img)
             processed_angles.append(angle)
+        
+        processed_images = np.array(processed_images)
+        processed_angles = np.array(np.clip(processed_angles, a_min = -1.0, a_max = 1.0))
 
-        return np.array(processed_images), np.array(processed_angles)
+        return processed_images, processed_angles
 
     def _load_image(self, image_file):
         img = cv2.imread(os.path.join(self.img_folder, image_file))
