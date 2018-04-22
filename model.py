@@ -160,7 +160,6 @@ def main(_):
         model = build_model(ip.output_shape())
 
     print(model.summary())
-    exit()
 
     model.compile(optimizer = Adam(lr = FLAGS.learning_rate), loss = FLAGS.loss)
 
