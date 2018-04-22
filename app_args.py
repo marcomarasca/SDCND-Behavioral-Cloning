@@ -20,3 +20,4 @@ flags.DEFINE_boolean('preprocess', True, 'True if the generator should preproces
 flags.DEFINE_boolean('clahe', False, 'True if histogram equalization should be applied during preprocessing')
 flags.DEFINE_boolean('blur', True, 'If blurring should be applied during preprocessing')
 flags.DEFINE_boolean('random_transform', True, 'True if random image transformations should be applied during training')
+flags.DEFINE_boolean('v2', False, 'True to use the model version with max pooling')

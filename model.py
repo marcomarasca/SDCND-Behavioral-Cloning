@@ -53,7 +53,7 @@ def build_model(input_shape, activation = FLAGS.activation, batch_norm = FLAGS.b
     # First three convolutions (filter size 5, stride 2x2)
     x = Convolution2D(24, 5, 5, subsample = (2, 2), activation = activation)(x) # 98x31@24
     x = Convolution2D(36, 5, 5, subsample = (2, 2), activation = activation)(x) # 47x14@36
-    x = Convolution2D(48, 5, 5, subsample = (2, 2), activation = activation)(x) #  22x5@48
+    x = Convolution2D(48, 5, 5, subsample = (2, 2), activation = activation)(x) # 22x5@48
 
     # An adddional two convolutions with smaller filters (filter size 3)
     x = Convolution2D(64, 3, 3, activation = activation)(x)                     # 20x3@64
@@ -64,7 +64,49 @@ def build_model(input_shape, activation = FLAGS.activation, batch_norm = FLAGS.b
     
     # Fully conected layers with batch normalization and dropout
     x = fully_connected(x, 100, activation, batch_norm = batch_norm)
-    x = Dropout(p = dropout_prob)(x)
+
+    if dropout_prob > 0:
+        x = Dropout(p = dropout_prob)(x)
+
+    x = fully_connected(x, 50, activation, batch_norm = batch_norm)
+    x = fully_connected(x, 10, activation, batch_norm = batch_norm)
+
+    # The output is the steering angle
+    model_out = Dense(1)(x)
+
+    return Model(input = model_in, output = model_out)
+
+def build_model_v2(input_shape, activation = FLAGS.activation, batch_norm = FLAGS.batch_norm, dropout_prob = FLAGS.dropout):
+    '''
+    Defines the keras model based on the Nvidia end-to-end paper: https://arxiv.org/pdf/1604.07316v1.pdf
+    '''
+    # The images captured by the simulator
+    model_in = Input(shape = input_shape) # 200x66@3
+
+    # Normalize
+    x = Lambda(lambda x: x/255.0 - 0.5)(model_in)
+
+    # First three convolutions (filter size 5 with max pooling 2x2)
+    x = Convolution2D(24, 5, 5, activation = activation)(x)                        # 196x62@24
+    x = MaxPooling2D()(x)                                                          # 98x31@24
+    x = Convolution2D(36, 5, 5, activation = activation)(x)                        # 94x27@36
+    x = MaxPooling2D()(x)                                                          # 47x13@36
+    x = Convolution2D(48, 5, 5, activation = activation)(x)                        # 43x9@48
+    x = MaxPooling2D()(x)                                                          # 21x4@48
+
+    # An adddional two convolutions with smaller filters (filter size 3)
+    x = Convolution2D(64, 3, 3, border_mode = 'same', activation = activation)(x)  # 21x4@64
+    x = Convolution2D(64, 3, 3, border_mode = 'same', activation = activation)(x)  # 21x4@64
+    x = MaxPooling2D()(x)                                                          # 10x2@64
+
+    # Flatten
+    x = Flatten()(x)                                                               # 1280
+    
+    # Fully conected layers with batch normalization and dropout
+    x = fully_connected(x, 100, activation, batch_norm = batch_norm)
+
+    if dropout_prob > 0:
+        x = Dropout(p = dropout_prob)(x)
 
     x = fully_connected(x, 50, activation, batch_norm = batch_norm)
     x = fully_connected(x, 10, activation, batch_norm = batch_norm)
@@ -76,7 +118,8 @@ def build_model(input_shape, activation = FLAGS.activation, batch_norm = FLAGS.b
 
 def main(_):
 
-    print('Configuration PP: {}, R: {}, C: {}, B: {}, RT: {}'.format(
+    print('Configuration = (V2: {}, PP: {}, R: {}, C: {}, B: {}, RT: {})'.format(
+        FLAGS.v2,
         FLAGS.preprocess, 
         FLAGS.regenerate, 
         FLAGS.clahe,
@@ -111,9 +154,13 @@ def main(_):
                                             random_transform = False)
 
     
-    model = build_model(ip.output_shape())
+    if FLAGS.v2:
+        model = build_model_v2(ip.output_shape())
+    else:
+        model = build_model(ip.output_shape())
 
     print(model.summary())
+    exit()
 
     model.compile(optimizer = Adam(lr = FLAGS.learning_rate), loss = FLAGS.loss)
 
