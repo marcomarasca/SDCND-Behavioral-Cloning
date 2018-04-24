@@ -54,6 +54,7 @@ def process_image(img,
               top and bottom of the input image
         resize: optional, final size (excluding channels) of the image, (width, height)
         clahe: optional, apply contrast limited adaptive histogram equalization to the first channel
+        blur: True if a gaussian blur should be applied to the image
     
         Note: Clipping is applied before resizing
     

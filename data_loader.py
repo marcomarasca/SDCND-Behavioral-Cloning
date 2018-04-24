@@ -58,6 +58,7 @@ class DataLoader():
         self.normalize_bins = normalize_bins
         self.rnd_brightness_range = [-0.5, 1.5]
         self.rnd_translate_pixels_range = [-15, 15]
+        # This is the factor each pixel moves the angle by
         self.rnd_translate_pixels_fact = 0.01
 
     def load_dataset(self, regenerate = False):
@@ -156,6 +157,7 @@ class DataLoader():
             processed_angles.append(angle)
         
         processed_images = np.array(processed_images)
+        # Clips the angle to the correct range
         processed_angles = np.array(np.clip(processed_angles, a_min = -1.0, a_max = 1.0))
 
         return processed_images, processed_angles
