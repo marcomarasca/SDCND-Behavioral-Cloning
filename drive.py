@@ -47,7 +47,7 @@ class SimplePIController:
 
 
 controller = SimplePIController(0.1, 0.002)
-set_speed = 15
+set_speed = 25
 controller.set_desired(set_speed)
 
 
@@ -72,7 +72,11 @@ def telemetry(sid, data):
 
         throttle = controller.update(float(speed))
 
-        #print(steering_angle, throttle)
+        # On hard turns release the throttle
+        if abs(steering_angle) >= 0.6:
+            throttle = 0.0
+
+        print(steering_angle, throttle)
         send_control(steering_angle, throttle)
 
         # save frame
