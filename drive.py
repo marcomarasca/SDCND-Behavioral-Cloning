@@ -15,6 +15,7 @@ from io import BytesIO
 from keras.models import load_model
 import h5py
 from keras import __version__ as keras_version
+from tqdm import tqdm
 
 import cv2
 import image_processor as ip
@@ -49,6 +50,7 @@ class SimplePIController:
 controller = SimplePIController(0.1, 0.002)
 set_speed = 25
 controller.set_desired(set_speed)
+images = []
 
 
 @sio.on('telemetry')
@@ -76,18 +78,30 @@ def telemetry(sid, data):
         if abs(steering_angle) >= 0.6:
             throttle = 0.0
 
-        print(steering_angle, throttle)
+        print('Predicted angle: {}'.format(steering_angle))
         send_control(steering_angle, throttle)
 
         # save frame
         if args.image_folder != '':
-            timestamp = datetime.utcnow().strftime('%Y_%m_%d_%H_%M_%S_%f')[:-3]
-            image_filename = os.path.join(args.image_folder, timestamp)
-            image.save('{}.jpg'.format(image_filename))
+            if args.save_on_disconnect:
+                images.append(image)
+            else:
+                timestamp = datetime.utcnow().strftime('%Y_%m_%d_%H_%M_%S_%f')[:-3]
+                image_filename = os.path.join(args.image_folder, timestamp)
+                image.save('{}.jpg'.format(image_filename))
     else:
         # NOTE: DON'T EDIT THIS.
         sio.emit('manual', data={}, skip_sid=True)
 
+@sio.on('disconnect')
+def disconnect(sid):
+    if len(images) > 0:
+        print('Saving {} frames...'.format(len(images)))
+        for image in tqdm(images, unit=' images', desc='Saving'):
+            timestamp = datetime.utcnow().strftime('%Y_%m_%d_%H_%M_%S_%f')[:-3]
+            image_filename = os.path.join(args.image_folder, timestamp)
+            image.save('{}.jpg'.format(image_filename))
+        images.clear()
 
 @sio.on('connect')
 def connect(sid, environ):
@@ -119,8 +133,21 @@ if __name__ == '__main__':
         default='',
         help='Path to image folder. This is where the images from the run will be saved.'
     )
+    parser.add_argument(
+        '--save_on_disconnect',
+        type=bool,
+        default=False,
+        help='True if the images should be saved when disconnecting from the simulator, improves performance.'
+    )
+    parser.add_argument(
+        '--speed',
+        type=int,
+        default=30,
+        help='The desired speed'
+    )
     args = parser.parse_args()
 
+    controller.set_desired(args.speed)
     # check that model Keras version is same as local Keras version
     f = h5py.File(args.model, mode='r')
     model_version = f.attrs.get('keras_version')
