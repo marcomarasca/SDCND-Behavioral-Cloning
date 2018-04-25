@@ -3,10 +3,9 @@ __pycache__
 *.ipynb
 logs
 data/
-model_*.h5
-model_*.png
+models/
+tmp/
+runs/
 nohup.out
 run.sh
-tmp/
 data.zip
-runs/
